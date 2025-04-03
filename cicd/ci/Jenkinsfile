@@ -19,7 +19,10 @@ pipeline {
                         $class: 'GitSCM',
                         branches: [[name: '*/main']],
                         userRemoteConfigs: [
-                            [url: REPO_URL, credentialsId: GITHUB_CREDENTIALS_ID]
+                            [
+                                url: REPO_URL,
+                                credentialsId: GITHUB_CREDENTIALS_ID
+                            ]
                         ]
                     ])
                 }
@@ -29,7 +32,6 @@ pipeline {
         stage('Build') {
             steps {
                 script {
-                    sh 'chmod +x gradlew'
                     sh './gradlew build -x test -x runSmokeTest'
                 }
             }
@@ -55,29 +57,34 @@ pipeline {
             steps {
                 script {
                     withSonarQubeEnv('SonarQube') {
-                        sh './gradlew sonar -Dsonar.login="$SONAR_AUTH_TOKEN" --stacktrace --info'
+                        sh './gradlew sonar -Dsonar.login=$SONAR_AUTH_TOKEN'
                     }
 
-                    timeout(time: 5, unit: 'MINUTES') {
-                        def qualityGate = waitForQualityGate()
-                        if (qualityGate.status != 'OK') {
-                            error "SonarQube Quality Gate failed: ${qualityGate.status}"
-                        } else {
-                            echo "SonarQube Quality Gate passed."
-                        }
+                    def qualityGate = waitForQualityGate()
+                    if (qualityGate.status != 'OK') {
+                        error "SonarQube Quality Gate failed: ${qualityGate.status}"
+                    } else {
+                        echo "SonarQube Quality Gate passed."
                     }
                 }
             }
         }
 
-        stage('Build and Push Docker Image') {
+        stage('Build and Push docker image') {
             steps {
                 script {
                     def commitHash = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+
+                    // Define the Docker image tag as the commit hash
                     def imageTag = "${commitHash}"
+
+                    echo "Image tag : ${imageTag}"
+
                     def imageNameWithTag = "${IMAGE_NAME}:${imageTag}"
 
-                    echo "Building and pushing Docker image: ${imageNameWithTag}"
+                    echo "Image name with tag : ${imageNameWithTag}"
+
+                    echo "Push image in docker hub"
 
                     docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS_ID) {
                         def image = docker.build(imageNameWithTag)
@@ -95,60 +102,74 @@ pipeline {
                     def containerName = "exchangerates-container"
                     def imageTag = env.COMMIT_HASH
 
+                    // Check if the container is running, then stop and remove it
                     sh """
-                        docker ps -q -f name=${containerName} | xargs -r docker stop
-                        docker ps -a -q -f name=${containerName} | xargs -r docker rm
+                        if [ \$(docker ps -q -f name=${containerName}) ]; then
+                            echo "Stopping and removing existing container..."
+                            docker stop ${containerName}
+                            docker rm ${containerName}
+                        fi
                     """
 
+                    // Run the new container
                     sh """
+                        echo "Running new container with image tag ${imageTag}..."
                         docker run -d --name ${containerName} -p 8090:8080 ${IMAGE_NAME}:${imageTag}
                     """
                 }
             }
         }
 
-        stage('Health Check on Dev') {
+        stage('Health check on Dev') {
             steps {
                 script {
-                    echo "Waiting for application to be ready..."
+                    echo "Performing health check on Docker container..."
+
                     sleep(time: 30, unit: "SECONDS")
 
-                    def healthUrl = "http://localhost:8090/actuator/health"
+                    def healthUrl = "http://host.docker.internal:8090/actuator/health"
 
                     def response = sh(script: "curl -s ${healthUrl}", returnStdout: true).trim()
-                    echo "Health check response: ${response}"
+
+                    echo "Response from health check API: ${response}"
 
                     def jsonResponse = readJSON text: response
+
                     def status = jsonResponse.status
 
+                    echo "Health Status: ${status}"
+
                     if (status == 'UP') {
-                        echo 'Application is healthy.'
+                        echo 'Health check passed: Application is healthy.'
                     } else {
                         error 'Health check failed: Application is not healthy.'
                     }
+
                 }
             }
         }
 
-        stage('Update Image Tag in Kubernetes') {
+        stage('Update image tag') {
             steps {
                 script {
                     def imageTag = env.COMMIT_HASH
 
-                    sh 'git fetch origin main'
-                    sh 'git reset --hard origin/main'
+                     sh 'git checkout main'
 
+                    // Use 'sed' to replace the image tag in values.yaml
                     sh """
                         sed -i 's/tag:.*/tag: ${imageTag}/' k8chart/values.yaml
                     """
 
-                    withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                    withCredentials([
+                        gitUsernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, gitToolName: 'Default')
+                    ]) {
                         sh """
-                            git config --global user.email "kodedge-bot-ci@kodedge.com"
-                            git config --global user.name "kodedge-bot-ci"
-                            git add k8chart/values.yaml
-                            git commit -m "Update image tag to version ${imageTag}"
-                            git push https://${GIT_USER}:${GIT_PASS}@github.com/Jenium-lab/exchangerate.git main
+                             git config user.email "kodedge-bot-ci@kodedge.com"
+                             git config user.name "kodedge-bot-ci"
+                             git add k8chart/values.yaml
+                             git commit -m "Update image tag to version ${imageTag}"
+                             git push origin main
                         """
                     }
                 }
@@ -158,12 +179,14 @@ pipeline {
 
     post {
         always {
-            echo 'Cleaning up workspace...'
+            echo 'Clean up workspace after build'
             cleanWs()
         }
+
         success {
-            echo 'Pipeline completed successfully!'
+            echo 'Pipeline successful!'
         }
+
         failure {
             echo 'Pipeline failed!'
         }
