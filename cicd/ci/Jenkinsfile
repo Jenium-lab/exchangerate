@@ -55,7 +55,7 @@ pipeline {
             steps {
                 script {
                     withSonarQubeEnv('SonarQube') {
-                        sh './gradlew sonar -Dsonar.login=${env.SONAR_AUTH_TOKEN}'
+                        sh './gradlew sonar -Dsonar.login="$SONAR_AUTH_TOKEN" --stacktrace --info'
                     }
 
                     timeout(time: 5, unit: 'MINUTES') {
