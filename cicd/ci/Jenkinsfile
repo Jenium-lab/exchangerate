@@ -2,11 +2,11 @@ pipeline {
     agent any
 
     environment {
-        GITHUB_CREDENTIALS_ID = 'github'                  // Jenkins credentials ID for GitHub
+        GITHUB_CREDENTIALS_ID = 'github'
         REPO_URL = 'https://github.com/Jenium-lab/exchangerate.git'
-        SONAR_AUTH_TOKEN = credentials('sonarqube')       // SonarQube token as secret
-        DOCKER_CREDENTIALS_ID = 'dockerhub'               // Docker Hub credentials ID
-        IMAGE_NAME = 'srijan581/exchangerate'             // Docker Hub image name
+        SONAR_AUTH_TOKEN = credentials('sonarqube')
+        DOCKER_CREDENTIALS_ID = 'dockerhub'
+        IMAGE_NAME = 'srijan581/exchangerate'
         GRADLE_HOME = '/opt/gradle'
         PATH = "$GRADLE_HOME/bin:$PATH"
     }
@@ -28,35 +28,43 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh 'chmod +x gradlew'
-                sh './gradlew build -x test -x runSmokeTest'
+                script {
+                    sh 'chmod +x gradlew'
+                    sh './gradlew build -x test -x runSmokeTest'
+                }
             }
         }
 
         stage('Unit Test') {
             steps {
-                sh './gradlew test'
+                script {
+                    sh './gradlew test'
+                }
             }
         }
 
         stage('Smoke Test') {
             steps {
-                sh './gradlew runSmokeTest'
+                script {
+                    sh './gradlew runSmokeTest'
+                }
             }
         }
 
         stage('Code Analysis') {
             steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh './gradlew sonar -Dsonar.login=$SONAR_AUTH_TOKEN --stacktrace --info'
-                }
+                script {
+                    withSonarQubeEnv('SonarQube') {
+                        sh './gradlew sonar -Dsonar.login="$SONAR_AUTH_TOKEN" --stacktrace --info'
+                    }
 
-                timeout(time: 10, unit: 'MINUTES') {
-                    def qualityGate = waitForQualityGate()
-                    if (qualityGate.status != 'OK') {
-                        error "SonarQube Quality Gate failed: ${qualityGate.status}"
-                    } else {
-                        echo "SonarQube Quality Gate passed."
+                    timeout(time: 10, unit: 'MINUTES') {
+                        def qualityGate = waitForQualityGate()
+                        if (qualityGate.status != 'OK') {
+                            error "SonarQube Quality Gate failed: ${qualityGate.status}"
+                        } else {
+                            echo "SonarQube Quality Gate passed."
+                        }
                     }
                 }
             }
@@ -66,9 +74,8 @@ pipeline {
             steps {
                 script {
                     def commitHash = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    def imageTag = commitHash ? commitHash : 'latest' // Fallback to 'latest' if commitHash is empty
+                    def imageTag = "${commitHash}"
                     def imageNameWithTag = "${IMAGE_NAME}:${imageTag}"
-                    env.COMMIT_HASH = commitHash
 
                     echo "Building and pushing Docker image: ${imageNameWithTag}"
 
@@ -76,6 +83,8 @@ pipeline {
                         def image = docker.build(imageNameWithTag)
                         image.push()
                     }
+
+                    env.COMMIT_HASH = commitHash
                 }
             }
         }
@@ -86,13 +95,11 @@ pipeline {
                     def containerName = "exchangerates-container"
                     def imageTag = env.COMMIT_HASH
 
-                    // Stop and remove old container (if exists)
                     sh """
                         docker ps -q -f name=${containerName} | xargs -r docker stop
                         docker ps -a -q -f name=${containerName} | xargs -r docker rm
                     """
 
-                    // Run the new container
                     sh """
                         docker run -d --name ${containerName} -p 8090:8080 ${IMAGE_NAME}:${imageTag}
                     """
@@ -107,12 +114,14 @@ pipeline {
                     sleep(time: 30, unit: "SECONDS")
 
                     def healthUrl = "http://localhost:8090/actuator/health"
+
                     def response = sh(script: "curl -s ${healthUrl}", returnStdout: true).trim()
-
                     echo "Health check response: ${response}"
-                    def jsonResponse = readJSON text: response
 
-                    if (jsonResponse.status == 'UP') {
+                    def jsonResponse = readJSON text: response
+                    def status = jsonResponse.status
+
+                    if (status == 'UP') {
                         echo 'Application is healthy.'
                     } else {
                         error 'Health check failed: Application is not healthy.'
@@ -129,15 +138,16 @@ pipeline {
                     sh 'git fetch origin main'
                     sh 'git reset --hard origin/main'
 
-                    // Update image tag in values.yaml
-                    sh "sed -i 's/tag:.*/tag: ${imageTag}/' k8chart/values.yaml"
+                    sh """
+                        sed -i 's/tag:.*/tag: ${imageTag}/' k8chart/values.yaml
+                    """
 
                     withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
                         sh """
                             git config --global user.email "jenium81@gmail.com"
                             git config --global user.name "Jenium-lab"
                             git add k8chart/values.yaml
-                            git commit -m "Update image tag to version ${imageTag}" || echo 'No changes to commit.'
+                            git commit -m "Update image tag to version ${imageTag}"
                             git push https://${GIT_USER}:${GIT_PASS}@github.com/Jenium-lab/exchangerate.git main
                         """
                     }
