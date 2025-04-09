@@ -140,27 +140,45 @@ pipeline {
             steps {
                 script {
                     def imageTag = env.COMMIT_HASH
+                    echo "Image Tag: ${imageTag}"
 
                     // Fetch the latest changes from the remote 'main' branch
+                    echo "Fetching latest changes from the remote repository..."
                     sh 'git fetch origin main'
                     sh 'git reset --hard origin/main'
 
+                    // Check if the values.yaml file exists in the k8chart/ directory
+                    def valuesFilePath = 'k8chart/values.yaml'
+                    def fileExists = sh(script: "test -f ${valuesFilePath}", returnStatus: true)
+                    
+                    // Debug output
+                    echo "Checking if the file ${valuesFilePath} exists. Status: ${fileExists}"
+
+                    if (fileExists != 0) {
+                        error "The file ${valuesFilePath} does not exist in the repository!"
+                    }
+
                     // Replace the image tag in values.yaml
+                    echo "Replacing image tag in ${valuesFilePath}..."
                     sh """
-                        sed -i 's/tag:.*/tag: ${imageTag}/' k8chart/values.yaml
+                        sed -i 's/tag:.*/tag: ${imageTag}/' ${valuesFilePath}
                     """
 
                     // Check if there are changes to commit
                     def changesExist = sh(script: 'git diff --quiet', returnStatus: true)
+                    echo "Changes detected: ${changesExist}"
+
                     if (changesExist == 0) {
                         echo 'No changes detected. Skipping commit and push.'
                     } else {
                         // Commit and push the changes
+                        echo "Committing changes and pushing to GitHub..."
+
                         withCredentials([usernamePassword(credentialsId: 'GITHUB_CREDENTIALS_ID', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
                             sh """
                                 git config --global user.email "jenium81@gmail.com"
                                 git config --global user.name "Jenium-lab"
-                                git add k8chart/values.yaml
+                                git add ${valuesFilePath}
                                 git commit -m "Update image tag to version ${imageTag}"
                                 git push https://${GIT_USER}:${GIT_PASS}@github.com/Jenium-lab/exchangerate.git main
                             """
