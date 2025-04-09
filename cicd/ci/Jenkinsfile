@@ -141,25 +141,29 @@ pipeline {
                 script {
                     def imageTag = env.COMMIT_HASH
 
-            // Fetch the latest changes from the remote 'main' branch
+                    // Fetch the latest changes from the remote 'main' branch
                     sh 'git fetch origin main'
                     sh 'git reset --hard origin/main'
 
-            // Replace the image tag in the values.yaml file with the latest commit hash
+                    // Replace the image tag in values.yaml
                     sh """
-                    sed -i 's/tag:.*/tag: ${imageTag}/' k8chart/values.yaml
+                        sed -i 's/tag:.*/tag: ${imageTag}/' k8chart/values.yaml
                     """
 
-            // Use credentials securely and push changes to GitHub
-                    withCredentials([usernamePassword(credentialsId: 'GITHUB_CREDENTIALS_ID', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
-                // Configure git user details
-                    sh """
-                        git config --global user.email "jenium81@gmail.com"
-                        git config --global user.name "Jenium-lab"
-                        git add k8chart/values.yaml
-                        git commit -m "Update image tag to version ${imageTag}"
-                        git push https://${GIT_USER}:${GIT_PASS}@github.com/Jenium-lab/exchangerate.git main
-                    """
+                    // Check if there are changes to commit
+                    def changesExist = sh(script: 'git diff --quiet', returnStatus: true)
+                    if (changesExist == 0) {
+                        echo 'No changes detected. Skipping commit and push.'
+                    } else {
+                        // Commit and push the changes
+                        withCredentials([usernamePassword(credentialsId: 'GITHUB_CREDENTIALS_ID', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
+                            sh """
+                                git config --global user.email "jenium81@gmail.com"
+                                git config --global user.name "Jenium-lab"
+                                git add k8chart/values.yaml
+                                git commit -m "Update image tag to version ${imageTag}"
+                                git push https://${GIT_USER}:${GIT_PASS}@github.com/Jenium-lab/exchangerate.git main
+                            """
                     }
                 }
             }
