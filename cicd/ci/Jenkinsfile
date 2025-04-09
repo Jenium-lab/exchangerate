@@ -119,7 +119,7 @@ pipeline {
                     echo "Waiting for application to be ready..."
                     sleep(time: 30, unit: "SECONDS")
 
-                    def healthUrl = "http://172.25.204.24:8080/actuator/health"
+                    def healthUrl = "http://172.25.204.23:8090/actuator/health"
 
                     def response = sh(script: "curl -s ${healthUrl}", returnStdout: true).trim()
                     echo "Health check response: ${response}"
