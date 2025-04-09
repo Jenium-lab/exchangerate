@@ -164,6 +164,7 @@ pipeline {
                                 git commit -m "Update image tag to version ${imageTag}"
                                 git push https://${GIT_USER}:${GIT_PASS}@github.com/Jenium-lab/exchangerate.git main
                             """
+                        }
                     }
                 }
             }
