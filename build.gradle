@@ -57,7 +57,7 @@ sonarqube {
 	properties {
 		property "sonar.projectKey", "excchangerates-sonar"
 		property "sonar.projectName", "excchangerates"
-		property "sonar.host.url", "http://localhost:9001"
+		property "sonar.host.url", "http://172.25.204.23:32001"
 	}
 }
 
